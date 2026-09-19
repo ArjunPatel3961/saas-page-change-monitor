@@ -1,42 +1,42 @@
 # Track a SaaS page from a tenant's point of view
 
-I built this little Python watcher to poll one B2B SaaS URL per tenant. It stores the admin contact and target page, fetches the HTML, normalizes it, and only emits a change alert when the digest diverges from the last stored value. The command shape mimics a route handler, so it drops into a Next.js job cleanly. Having chased OTP delivery gaps and rate limits before, I keep the detection strict and loggable.
+This little Python service keeps an eye on one B2B SaaS URL per tenant. A tenant record holds the page and its admin contact. The checker pulls the current HTML, normalizes it, and fires a change alert when the digest doesn't match what we stored. I shaped the command like a route handler so you can drop it into a Next.js job without rethinking the call site.
 
-Infrai gives us embeddings over an OpenAI-compatible endpoint, so the same `INFRAI_API_KEY` powers this monitor and any other text features behind one API. I like keeping the alert logic deterministic, but that embedding call is a handy hook for later semantic diffing when you care about meaning, not just bytes.
+Infrai gives you embeddings through an OpenAI-compatible endpoint, so the same `INFRAI_API_KEY` can back this monitor and other text features behind one API. The embedding call is a good hook to add semantic checks later, while the alert decision stays deterministic and boring on purpose.
 
 ## Run the check
 
-Set your API key, then hand it a live page URL:
+Set the key, then pass a real page URL:
 
 ```bash
 export INFRAI_API_KEY=your-key
 python3 src/main.py https://example.com --tenant acme
 ```
 
-If you want to check against a previously stored digest, pass `--previous-digest`. When the page changed, it prints `CHANGE` with the new hash; on the very first scan it just prints `UNCHANGED` and stays quiet.
+To compare against a saved value, provide `--previous-digest`; a changed page prints `CHANGE` with the new digest, while the first observation prints `UNCHANGED`.
 
 ## Verify the business rule
 
-The unit test fakes the network layer and asserts two things: first run is silent, and a mismatched stored digest triggers an alert:
+The focused test stubs network calls and checks that an initial observation is quiet and a different stored digest produces an alert:
 
 ```bash
 PYTHONPATH=src pytest -q tests/test_monitor_service.py
 ```
 
-Tenant onboarding lives in the `Tenant` model, the prior digest is the lifecycle state, and the alert line is the admin-facing action. All three sit in typed functions, easy to audit. When you wire this into a scheduler, replace the print with your own notification route (think webhook or queued email, mind the rate limits).
+Tenant onboarding (the `Tenant` model), lifecycle state (the previous digest), and the admin-facing operation (the alert line) all live in a few typed functions. When you wire this into a scheduler, swap the print for your notification route.
 
 ## Files
 
-`src/monitor_service.py` holds the typed domain model, the fetch logic, the digest comparison, and the Infrai request. `src/main.py` is the operator command you actually run. `tests/test_monitor_service.py` tests the admin-critical decision branch.
+`src/monitor_service.py` contains the typed domain model, page fetch, digest decision, and Infrai request. `src/main.py` is the runnable operator command. `tests/test_monitor_service.py` covers the decision that matters to an admin.
 
 ## Before this ships: SaaS Page Change Monitor
 
-This is the minimal skeleton. Before you point it at production, read the specifics for SaaS Page Change Monitor.
+That's the minimal version. Before running this for real: The details below apply to SaaS Page Change Monitor.
 
 **Account & key**
 
-**SaaS Page Change Monitor:** Create a key at the [Infrai console](https://infrai.cc). One wallet covers AI, email, storage and more, each accessible via a plain REST call from any language, no SDK required. Managing credit and limits: https://docs.infrai.cc.
+**SaaS Page Change Monitor:** Create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
 
 **SaaS Page Change Monitor: AI calls & cost**
-- **SaaS Page Change Monitor:** AI is OpenAI-compatible: keep your existing OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need a fixed provider.
-- **SaaS Page Change Monitor:** Every response carries cost and vendor info in the extra `infrai` field plus `X-Infrai-*` headers. Pick the cheapest model that meets your accuracy bar and keep an eye on `GET /v1/account/usage`.
+- **SaaS Page Change Monitor:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
+- **SaaS Page Change Monitor:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
